@@ -2,8 +2,7 @@
 
 [中文](./README.md) | 会话统计插件 for ZCode Desktop。
 
-在 ZCode 里复刻 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 的
-「会话统计」：轮次/步数、模型/工具耗时、TTFT（首 token 平均延迟）、TPS（会话平均 +
+ZCode 会话统计插件：轮次/步数、模型/工具耗时、TTFT（首 token 平均延迟）、TPS（会话平均 +
 最近请求）、token 用量、缓存命中率与模型分布。
 
 - **零第三方依赖**：MCP 服务器为 Python 标准库实现（3.10+），无 pip 依赖
@@ -20,8 +19,6 @@
 | 输入框统计条（可选） | 输入框下方居中的常驻统计条，需宿主补丁（见下） |
 
 ## 安装
-
-完整分步指引（含截图级细节与验收清单）见 **[docs/SETUP_GUIDE.md](./docs/SETUP_GUIDE.md)**。
 
 插件本体：ZCode Desktop → **Plugin Marketplace → Add** → 粘贴本仓库地址
 （或下载 ZIP 后粘贴解压目录）→ **Install session-stats** → 重启 → `/stats`。
