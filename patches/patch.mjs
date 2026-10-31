@@ -38,18 +38,69 @@ const PILLS_SRC = path.join(here, "pills-loader.js");
 // 测试模式：ZCODE_RESOURCES_DIR 指向一个 app.asar 副本目录即可干跑（不校验 ZCode 进程）
 const TEST_MODE = !!process.env.ZCODE_RESOURCES_DIR;
 
-// 生产模式：按常见安装位置自动定位 ZCode 的 resources 目录
+// 枚举本地固定磁盘（DriveType=3，避开断网映射盘/光驱）；PowerShell 不可用则回退 A-Z 探测
+function fixedDrives() {
+  try {
+    const out = execSync(
+      "powershell -NoProfile -Command \"(Get-CimInstance Win32_LogicalDisk -Filter 'DriveType=3').DeviceID\"",
+      { timeout: 8000, encoding: "utf8", windowsHide: true }
+    );
+    const ds = out.split(/\r?\n/).map((s) => s.trim()).filter((s) => /^[A-Z]:$/.test(s)).map((s) => s + "\\");
+    if (ds.length) return ds;
+  } catch { /* 回退到 A-Z 探测 */ }
+  const ds = [];
+  for (let i = 65; i <= 90; i++) {
+    const d = String.fromCharCode(i) + "\\";
+    try { if (fs.existsSync(d)) ds.push(d); } catch { /* 跳过不可访问盘 */ }
+  }
+  return ds;
+}
+
+// 生产模式：全盘自动定位 ZCode 的 resources 目录
+// ① 每个本地盘的常见安装模式（精确路径，瞬时）② 各盘浅层扫描（深度≤2，目录名含 ZCode，
+// 必须真实存在 app.asar 才命中）。仍未命中则返回 null，由调用方提示手动指定。
 function resolveResourcesDir() {
   if (TEST_MODE) return process.env.ZCODE_RESOURCES_DIR;
   const pf = process.env.ProgramFiles || "C:\\Program Files";
   const pf86 = process.env["ProgramFiles(x86)"] || "C:\\Program Files (x86)";
-  const candidates = [
+  const drives = fixedDrives();
+  const patterns = [
     path.join(process.env.LOCALAPPDATA || "", "Programs", "ZCode", "resources"),
     path.join(pf, "ZCode", "resources"),
     path.join(pf86, "ZCode", "resources"),
   ];
-  for (const c of candidates) {
-    if (c && fs.existsSync(path.join(c, "app.asar"))) return c;
+  for (const d of drives) {
+    patterns.push(
+      path.join(d, "Program Files", "ZCode", "resources"),
+      path.join(d, "Program Files (x86)", "ZCode", "resources"),
+      path.join(d, "Programs", "ZCode", "resources"),
+      path.join(d, "ZCode", "resources"),
+      path.join(d, "soft", "ZCode", "resources"),
+      path.join(d, "software", "ZCode", "resources"),
+      path.join(d, "app", "ZCode", "resources"),
+    );
+  }
+  for (const p of patterns) {
+    try { if (fs.existsSync(path.join(p, "app.asar"))) return p; } catch { /* 跳过 */ }
+  }
+  // 浅层扫描：深度 ≤2
+  for (const d of drives) {
+    let tops = [];
+    try { tops = fs.readdirSync(d, { withFileTypes: true }).filter((e) => e.isDirectory()); } catch { continue; }
+    for (const t of tops) {
+      const names = [path.join(d, t.name)];
+      try {
+        for (const c of fs.readdirSync(path.join(d, t.name), { withFileTypes: true })) {
+          if (c.isDirectory()) names.push(path.join(d, t.name, c.name));
+        }
+      } catch { continue; }
+      for (const n of names) {
+        if (!/zcode/i.test(path.basename(n))) continue;
+        for (const cand of [path.join(n, "resources"), n]) {
+          try { if (fs.existsSync(path.join(cand, "app.asar"))) return cand; } catch { /* 跳过 */ }
+        }
+      }
+    }
   }
   return null;
 }
@@ -122,14 +173,11 @@ function apply() {
 
   const resources = resolveResourcesDir();
   if (!resources) {
-    die("未找到 ZCode 的 resources 目录（已尝试：\n" +
-        "  1. %LOCALAPPDATA%\\Programs\\ZCode\\resources\n" +
-        "  2. %ProgramFiles%\\ZCode\\resources\n" +
-        "  3. %ProgramFiles(x86)%\\ZCode\\resources）\n" +
-        "请先定位你的 ZCode 安装位置（右键 ZCode 快捷方式 → 打开文件位置，\n" +
-        "ZCode.exe 旁边就是 resources 文件夹），然后设置环境变量：\n" +
-        "  set ZCODE_RESOURCES_DIR=<实际路径>\\resources\n" +
-        "并在同一个命令行窗口里运行本脚本。");
+    die("未找到 ZCode 的 resources 目录。\n" +
+        "已自动扫描所有本地磁盘的常见安装位置与 *ZCode* 目录（深度 2 层），均未发现 app.asar。\n" +
+        "请手动定位：右键 ZCode 快捷方式 → 打开文件位置，ZCode.exe 旁边就是 resources 文件夹。\n" +
+        "然后设置环境变量并重试（同一命令行窗口内）：\n" +
+        "  set ZCODE_RESOURCES_DIR=<实际路径>\\resources");
   }
   const asarPath = path.join(resources, "app.asar");
   const unpackedDir = asarPath + ".unpacked";
