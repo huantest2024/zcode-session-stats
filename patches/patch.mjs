@@ -38,6 +38,22 @@ const PILLS_SRC = path.join(here, "pills-loader.js");
 // 测试模式：ZCODE_RESOURCES_DIR 指向一个 app.asar 副本目录即可干跑（不校验 ZCode 进程）
 const TEST_MODE = !!process.env.ZCODE_RESOURCES_DIR;
 
+// 生产模式：按常见安装位置自动定位 ZCode 的 resources 目录
+function resolveResourcesDir() {
+  if (TEST_MODE) return process.env.ZCODE_RESOURCES_DIR;
+  const pf = process.env.ProgramFiles || "C:\\Program Files";
+  const pf86 = process.env["ProgramFiles(x86)"] || "C:\\Program Files (x86)";
+  const candidates = [
+    path.join(process.env.LOCALAPPDATA || "", "Programs", "ZCode", "resources"),
+    path.join(pf, "ZCode", "resources"),
+    path.join(pf86, "ZCode", "resources"),
+  ];
+  for (const c of candidates) {
+    if (c && fs.existsSync(path.join(c, "app.asar"))) return c;
+  }
+  return null;
+}
+
 const log = (...a) => console.log(...a);
 const die = (msg) => { console.error("✗ " + msg); process.exit(1); };
 
@@ -104,7 +120,17 @@ function apply() {
   }
   if (!fs.existsSync(PILLS_SRC)) die(`找不到注入脚本: ${PILLS_SRC}`);
 
-  const resources = TEST_MODE ? process.env.ZCODE_RESOURCES_DIR : DEFAULT_RESOURCES;
+  const resources = resolveResourcesDir();
+  if (!resources) {
+    die("未找到 ZCode 的 resources 目录（已尝试：\n" +
+        "  1. %LOCALAPPDATA%\\Programs\\ZCode\\resources\n" +
+        "  2. %ProgramFiles%\\ZCode\\resources\n" +
+        "  3. %ProgramFiles(x86)%\\ZCode\\resources）\n" +
+        "请先定位你的 ZCode 安装位置（右键 ZCode 快捷方式 → 打开文件位置，\n" +
+        "ZCode.exe 旁边就是 resources 文件夹），然后设置环境变量：\n" +
+        "  set ZCODE_RESOURCES_DIR=<实际路径>\\resources\n" +
+        "并在同一个命令行窗口里运行本脚本。");
+  }
   const asarPath = path.join(resources, "app.asar");
   const unpackedDir = asarPath + ".unpacked";
   for (const p of [asarPath, unpackedDir]) {
@@ -249,7 +275,8 @@ function apply() {
 
 function restore() {
   if (!TEST_MODE && zcodeRunning()) die("ZCode 正在运行，请先完全退出再还原。");
-  const resources = TEST_MODE ? process.env.ZCODE_RESOURCES_DIR : DEFAULT_RESOURCES;
+  const resources = resolveResourcesDir();
+  if (!resources) die("未找到 ZCode 的 resources 目录（自动发现失败），请设置 ZCODE_RESOURCES_DIR 后重试。");
   const asarPath = path.join(resources, "app.asar");
   const backups = fs.readdirSync(resources)
     .filter((f) => f.startsWith("app.asar.bak-"))
@@ -262,7 +289,13 @@ function restore() {
 }
 
 function status() {
-  const asarPath = path.join(TEST_MODE ? process.env.ZCODE_RESOURCES_DIR : DEFAULT_RESOURCES, "app.asar");
+  const resources = resolveResourcesDir();
+  if (!resources) {
+    log("未找到 ZCode 的 resources 目录（自动发现失败）");
+    log("ZCode 运行中:", zcodeRunning() ? "是" : "否");
+    return;
+  }
+  const asarPath = path.join(resources, "app.asar");
   try {
     const raw = extractFile(asarPath, MARKER).toString("utf8");
     log("补丁标记:", raw);
