@@ -1,0 +1,23 @@
+# UI 构建产物与依赖
+ui-src/node_modules/
+ui-src/bundle.js
+
+# 补丁工具与干跑产物
+patches/tools/node_modules/
+patches/work/
+patches/work-*/
+patches/test-resources/
+patches/*.asar
+patches/origin-entry.js
+patches/patched-entry.js
+
+# 临时调试产物
+*.log
+out.jsonl
+err.log
+
+# Python
+__pycache__/
+
+# 本地开发市场清单（发布用仓库根的 marketplace.json）
+plugins/marketplace.json

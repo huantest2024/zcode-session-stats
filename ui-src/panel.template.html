@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>会话统计</title>
+<style>
+  :root, [data-theme="dark"] {
+    --bg: transparent;
+    --card: rgba(255, 255, 255, 0.05);
+    --border: rgba(255, 255, 255, 0.12);
+    --text: rgba(245, 246, 248, 0.92);
+    --text-dim: rgba(245, 246, 248, 0.55);
+    --accent: #7aa2f7;
+    --ok: #9ece6a;
+    --err: #f7768e;
+  }
+  [data-theme="light"] {
+    --card: rgba(0, 0, 0, 0.04);
+    --border: rgba(0, 0, 0, 0.12);
+    --text: rgba(30, 32, 38, 0.92);
+    --text-dim: rgba(30, 32, 38, 0.55);
+    --accent: #3b5bdb;
+    --err: #c92a2a;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: var(--bg); }
+  body {
+    font: 13px/1.5 "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
+    color: var(--text);
+    padding: 10px;
+  }
+  .pills { display: flex; flex-wrap: wrap; gap: 8px; }
+  .pill {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 6px 12px; border-radius: 999px;
+    background: var(--card); border: 1px solid var(--border);
+    color: var(--text); font: inherit; cursor: pointer;
+    transition: border-color 0.15s;
+  }
+  .pill:hover { border-color: var(--accent); }
+  .pill .ico { opacity: 0.7; }
+  .pill .sep { opacity: 0.4; }
+  .scopebar {
+    display: flex; align-items: center; gap: 6px;
+    margin-top: 10px;
+  }
+  .tab {
+    padding: 3px 10px; border-radius: 6px; font: inherit; font-size: 12px;
+    background: transparent; border: 1px solid var(--border);
+    color: var(--text-dim); cursor: pointer;
+  }
+  .tab.on { color: var(--text); border-color: var(--accent); }
+  .upd { margin-left: auto; font-size: 11px; color: var(--text-dim); }
+  .card {
+    background: var(--card); border: 1px solid var(--border);
+    border-radius: 10px; padding: 12px 14px; margin-top: 10px;
+  }
+  .card.muted { color: var(--text-dim); }
+  .card.err { border-color: var(--err); }
+  .err-title { color: var(--err); font-weight: 600; margin-bottom: 4px; }
+  .err-body { word-break: break-all; }
+  .dtitle { font-weight: 600; margin-bottom: 8px; }
+  .dtitle.small { margin-top: 12px; font-size: 12px; color: var(--text-dim); }
+  table.kv { width: 100%; border-collapse: collapse; }
+  table.kv td { padding: 3px 0; vertical-align: top; }
+  table.kv td:first-child { color: var(--text-dim); padding-right: 12px; }
+  table.kv td.mono, .mono {
+    font-family: Consolas, "Cascadia Mono", monospace;
+    text-align: right; white-space: nowrap;
+  }
+  table.kv.models td, table.kv.models td:first-child { text-align: right; padding: 2px 0 2px 8px; }
+  table.kv.models td:first-child { text-align: left; padding-left: 0; max-width: 130px; overflow: hidden; text-overflow: ellipsis; }
+  table.kv tr.head td { color: var(--text-dim); border-bottom: 1px solid var(--border); }
+  .hint { margin-top: 8px; font-size: 11px; color: var(--text-dim); }
+</style>
+</head>
+<body>
+<div id="root"><div class="card muted">正在启动…</div></div>
+<script type="module">
+/*__BUNDLE__*/
+</script>
+</body>
+</html>
