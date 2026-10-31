@@ -108,7 +108,12 @@ function apply() {
   const asarPath = path.join(resources, "app.asar");
   const unpackedDir = asarPath + ".unpacked";
   for (const p of [asarPath, unpackedDir]) {
-    if (!fs.existsSync(p)) die(`宿主文件不存在: ${p}`);
+    if (!fs.existsSync(p)) {
+      die(`宿主文件不存在: ${p}\n` +
+          `  本脚本默认定位标准安装路径: ${resources}\n` +
+          `  若你的 ZCode 装在别处：设置环境变量 ZCODE_RESOURCES_DIR 指向其 resources 目录\n` +
+          `  （示例: set ZCODE_RESOURCES_DIR=D:\\Program Files\\ZCode\\resources），然后重试。`);
+    }
   }
   assertUnlocked(asarPath);
 
