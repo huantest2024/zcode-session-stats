@@ -41,7 +41,7 @@
 
   css = document.createElement("style");
   css.textContent =
-    ".__sspills-row{position:absolute;left:50%;transform:translateX(-50%);bottom:10px;" +
+    ".__sspills-row{position:absolute;bottom:10px;" +
     "display:inline-flex;align-items:center;gap:6px;z-index:30;}" +
     ".__sspills-pill{display:inline-flex;align-items:center;gap:5px;height:30px;padding:0 12px;" +
     "border-radius:8px;background:rgba(255,255,255,.045);border:1px solid rgba(255,255,255,.09);" +
@@ -93,9 +93,11 @@
       ["模型用时", fmtDur(d.model_ms)],
       ["工具调用用时", fmtDur(d.tool_ms)],
       ["首 token 平均（TTFT）", fmtDur(d.ttft_ms_avg)],
-      ["实时 TPS", lt ? Math.round(lt.v * 10) / 10 + " tok/s" + (lt.inflight ? "（进行中）" : "（最近请求）") : "—"],
-      ["平均 TPS（会话累计）", d.tps != null ? d.tps + " tok/s" : "—"],
     ];
+    if (lt) {
+      r1.push(["实时 TPS", Math.round(lt.v * 10) / 10 + " tok/s" + (lt.inflight ? "（进行中）" : "（最近请求）")]);
+    }
+    r1.push(["平均 TPS（会话累计）", d.tps != null ? d.tps + " tok/s" : "—"]);
     var r2 = [
       ["输入（含缓存）", fmtTok(t.input) + "（读 " + fmtTok(t.cache_read) + " / 写 " + fmtTok(t.cache_write) + "）"],
       ["输出", fmtTok(t.output) + "（含推理 " + fmtTok(t.reasoning) + "）"],
@@ -205,8 +207,8 @@
       .then(function (r) { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
       .then(function (j) {
         data = j; lastOk = Date.now(); fails = 0;
-        if (rowEl) rowEl.style.display = "";
         render();
+        layout();
         if (popupOpen) renderPopup();
       })
       .catch(function () {
@@ -275,33 +277,56 @@
     return el;
   }
 
-  /* 锚点：相对输入框水平居中——pill 绝对定位在输入条容器（dock-content）中心；
-     垂直方向动态对齐模型选择器的中心线（量 rect 差，不写死像素）。 */
-  function alignVertical(dock) {
-    if (!rowEl) return;
-    var trig = dock.querySelector('[data-testid="chat-model-select-trigger"]');
-    if (!trig) return;
-    var tr = trig.getBoundingClientRect();
-    var dr = dock.getBoundingClientRect();
-    if (!tr.height || !dr.height) return;
-    var pillH = rowEl.offsetHeight || 30;
-    var bottomOffset = (dr.bottom - (tr.top + tr.height / 2)) - pillH / 2;
-    rowEl.style.bottom = Math.max(0, Math.round(bottomOffset)) + "px";
+  function stripWs(s) {
+    return String(s).replace(/\s+/g, "");
+  }
+  function findChipByText(root, txt) {
+    var btns = root.querySelectorAll("button,[role='button']");
+    for (var i = 0; i < btns.length; i++) {
+      if (stripWs(btns[i].textContent) === txt) return btns[i];
+    }
+    return null;
   }
 
-  function mount() {
+  /* 布局：pill 放进「左侧 chip 组 ↔ 模型选择器」之间的空隙并居中；
+     垂直对齐模型选择器中心线；空隙不够（如侧边面板展开挤压）时隐藏，绝不重叠。 */
+  function layout() {
     var dock = document.querySelector("[data-v4-composer-dock-content]");
     if (!dock) {
       if (rowEl) { rowEl.remove(); }
       return;
     }
-    if (rowEl && rowEl.parentElement === dock && rowEl.isConnected) {
-      alignVertical(dock); // 每次 tick 校正垂直位置
-      return; // 已在输入条容器内
+    if (!rowEl || rowEl.parentElement !== dock || !rowEl.isConnected) {
+      if (!rowEl) rowEl = makeRow();
+      dock.appendChild(rowEl);
     }
-    if (!rowEl) rowEl = makeRow();
-    dock.appendChild(rowEl);
-    alignVertical(dock);
+    var trig = dock.querySelector('[data-testid="chat-model-select-trigger"]');
+    if (!trig) { rowEl.style.display = "none"; return; }
+    var leftChip = findChipByText(dock, "电脑操作") || findChipByText(dock, "完全访问");
+    var leftEdge, rightEdge;
+    if (leftChip) {
+      leftEdge = leftChip.getBoundingClientRect().right;
+      rightEdge = trig.getBoundingClientRect().left;
+    } else {
+      var dr0 = dock.getBoundingClientRect();
+      leftEdge = dr0.left + 60;
+      rightEdge = trig.getBoundingClientRect().left;
+    }
+    rowEl.style.display = ""; // 先显示才能量宽
+    var pw = rowEl.offsetWidth;
+    var gap = rightEdge - leftEdge;
+    if (gap >= pw + 24) {
+      var dockRect = dock.getBoundingClientRect();
+      var centerX = (leftEdge + rightEdge) / 2;
+      rowEl.style.left = Math.round(centerX - dockRect.left) + "px";
+      var tr = trig.getBoundingClientRect();
+      var dr = dock.getBoundingClientRect();
+      var pillH = rowEl.offsetHeight || 30;
+      rowEl.style.bottom = Math.max(0, Math.round((dr.bottom - (tr.top + tr.height / 2)) - pillH / 2)) + "px";
+      rowEl.style.display = "";
+    } else {
+      rowEl.style.display = "none"; // 空隙不足：隐藏而不是压到别的元素上
+    }
   }
 
   var scheduled = false;
@@ -310,7 +335,7 @@
     scheduled = true;
     requestAnimationFrame(function () {
       scheduled = false;
-      mount();
+      layout();
       var sid = currentSessionId();
       if (sid !== lastSid) poll();
     });
@@ -321,14 +346,14 @@
       setPopup(false);
     }
   }, true);
-  window.addEventListener("resize", function () { if (popupOpen) renderPopup(); });
+  window.addEventListener("resize", function () { layout(); if (popupOpen) renderPopup(); });
   document.addEventListener("scroll", function () { if (popupOpen) renderPopup(); }, true);
 
   var mo = new MutationObserver(schedule);
   mo.observe(document.documentElement, {
     childList: true, subtree: true, attributes: true, attributeFilter: ["data-session-id"],
   });
-  mount();
+  layout();
   popEl = document.createElement("div");
   popEl.className = "__sspills-pop";
   document.body.appendChild(popEl);
