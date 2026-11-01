@@ -41,7 +41,7 @@
 
   css = document.createElement("style");
   css.textContent =
-    ".__sspills-row{position:absolute;bottom:10px;" +
+    ".__sspills-row{position:absolute;bottom:10px;transform:translateX(-50%);" +
     "display:inline-flex;align-items:center;gap:6px;z-index:30;}" +
     ".__sspills-pill{display:inline-flex;align-items:center;gap:5px;height:30px;padding:0 12px;" +
     "border-radius:8px;background:rgba(255,255,255,.045);border:1px solid rgba(255,255,255,.09);" +
