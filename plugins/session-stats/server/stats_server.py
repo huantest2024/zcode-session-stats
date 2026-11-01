@@ -321,6 +321,13 @@ def build_stats(scope: str, session_id: str | None, session_source: str) -> dict
     payload["cache_hit_pct"] = round(min(hit, 100.0), 1) if hit is not None else None
     payload["models"] = models_breakdown(cur, cond, params)
     payload["recent"] = recent_requests(cur, cond, params)
+    # 最近一次完成请求的 TPS（面板/弹窗「实时 TPS」行）
+    live = None
+    for r in payload["recent"]:
+        if r["done_at"] is not None and r["fta"] is not None and (r["out"] or 0) > 0 and r["done_at"] > r["fta"]:
+            live = round(r["out"] * 1000.0 / (r["done_at"] - r["fta"]), 1)
+            break
+    payload["live_tps"] = live
     return payload
 
 
