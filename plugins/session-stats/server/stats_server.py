@@ -231,7 +231,7 @@ def recent_requests(cur, cond: str, params: list, limit: int = 6) -> list[dict]:
     rows = cur.execute(
         f"""
         SELECT logical_request_id, output_tokens, first_token_at, completed_at,
-               started_at, model_id
+               started_at, model_id, input_tokens, cache_read_input_tokens
         FROM model_usage WHERE {cond}
         ORDER BY started_at DESC LIMIT {int(limit)}
         """,
@@ -241,6 +241,7 @@ def recent_requests(cur, cond: str, params: list, limit: int = 6) -> list[dict]:
         {
             "rid": r[0], "out": r[1], "fta": r[2], "done_at": r[3],
             "started": r[4], "model": r[5],
+            "in": r[6], "cread": r[7],
         }
         for r in rows
     ]

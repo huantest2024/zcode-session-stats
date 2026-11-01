@@ -6,7 +6,7 @@
 
   var ENDPOINT = "http://127.0.0.1:31710";
   var POLL_MS = 5000;
-  var data = null, lastOk = 0, fails = 0, popupOpen = false;
+  var data = null, lastOk = 0, fails = 0, popupOpen = false, pillMode = "full";
   var rowEl = null, popEl = null, css = null, lastHtml = "";
 
   function fmtDur(ms) {
@@ -104,6 +104,16 @@
       ["总 token", fmtTok(t.total)],
       ["缓存命中率", d.cache_hit_pct != null ? d.cache_hit_pct + "%" : "—"],
     ];
+    // 最近一次完成的请求：输入/输出/缓存命中
+    var lr = null;
+    for (var ri = 0; ri < (d.recent || []).length; ri++) {
+      if (d.recent[ri].done_at != null) { lr = d.recent[ri]; break; }
+    }
+    if (lr && lr["in"] > 0) {
+      r2.push(["最近请求 输入", fmtTok(lr["in"])]);
+      r2.push(["最近请求 输出", fmtTok(lr.out)]);
+      r2.push(["最近请求 缓存命中", Math.round((lr.cread || 0) * 1000 / lr["in"]) / 10 + "%"]);
+    }
     var r3 = (d.models || []).slice(0, 5).map(function (m) {
       return [
         m.model_id || "—",
@@ -241,7 +251,7 @@
     return '<span class="__sspills-pill" data-act="detail">' +
       '<span class="ico">' + ico + "</span>" + body + "</span>";
   }
-  function pillHtml() {
+  function pillHtml(mode) {
     if (!data) return pillEl("⏱", "加载中…");
     if (data.draft) return pillEl("⏱", "新会话 · 暂无统计");
     if (data.error) return pillEl("⏱", "统计不可用");
@@ -251,6 +261,10 @@
     var shownHtml = shown != null
       ? shown + ' tok/s' + (lt && lt.inflight ? '<span class="live">●</span>' : "")
       : "—";
+    if (mode === "compact") {
+      // 迷你版：只显示关键信息——实时 TPS + token 消耗量
+      return pillEl("⏱", shownHtml + '<span class="sep">·</span><b>' + fmtTok(t.total) + " tok</b>");
+    }
     return pillEl("⏱",
       "<b>" + (data.turns != null ? data.turns : "—") + " 轮 " + (data.steps != null ? data.steps : 0) + " 步</b>" +
       '<span class="sep">·</span>' + shownHtml +
@@ -262,7 +276,7 @@
     if (!rowEl) return;
     var stale = Date.now() - lastOk > 9e5;
     rowEl.classList.toggle("stale", stale);
-    var html = pillHtml();
+    var html = pillHtml(pillMode);
     if (html !== lastHtml) { rowEl.innerHTML = html; lastHtml = html; }
   }
 
@@ -288,10 +302,21 @@
     return null;
   }
 
+  /* 只取「可见」的输入条容器——多标签页时隐藏标签页的 dock 也在 DOM 里，
+     拿第一个会量到错误几何（重叠的根因）。 */
+  function visibleDock() {
+    var docks = document.querySelectorAll("[data-v4-composer-dock-content]");
+    for (var i = 0; i < docks.length; i++) {
+      if (docks[i].offsetParent !== null) return docks[i];
+    }
+    return docks[0] || null;
+  }
+
   /* 布局：pill 放进「左侧 chip 组 ↔ 模型选择器」之间的空隙并居中；
-     垂直对齐模型选择器中心线；空隙不够（如侧边面板展开挤压）时隐藏，绝不重叠。 */
+     放不下完整版 → 自动缩窄为迷你版（实时 TPS + token 消耗量）；再放不下才隐藏。
+     垂直对齐模型选择器中心线。 */
   function layout() {
-    var dock = document.querySelector("[data-v4-composer-dock-content]");
+    var dock = visibleDock();
     if (!dock) {
       if (rowEl) { rowEl.remove(); }
       return;
@@ -312,21 +337,25 @@
       leftEdge = dr0.left + 60;
       rightEdge = trig.getBoundingClientRect().left;
     }
-    rowEl.style.display = ""; // 先显示才能量宽
-    var pw = rowEl.offsetWidth;
     var gap = rightEdge - leftEdge;
-    if (gap >= pw + 24) {
-      var dockRect = dock.getBoundingClientRect();
-      var centerX = (leftEdge + rightEdge) / 2;
-      rowEl.style.left = Math.round(centerX - dockRect.left) + "px";
-      var tr = trig.getBoundingClientRect();
-      var dr = dock.getBoundingClientRect();
-      var pillH = rowEl.offsetHeight || 30;
-      rowEl.style.bottom = Math.max(0, Math.round((dr.bottom - (tr.top + tr.height / 2)) - pillH / 2)) + "px";
+    var order = pillMode === "full" ? ["full", "compact"] : ["compact", "full"];
+    var chosen = null;
+    for (var mi = 0; mi < order.length; mi++) {
+      var mode = order[mi];
+      var html = pillHtml(mode);
+      if (html !== lastHtml) { rowEl.innerHTML = html; lastHtml = html; }
       rowEl.style.display = "";
-    } else {
-      rowEl.style.display = "none"; // 空隙不足：隐藏而不是压到别的元素上
+      if (gap >= rowEl.offsetWidth + 24) { chosen = mode; break; }
     }
+    if (!chosen) { rowEl.style.display = "none"; return; }
+    pillMode = chosen;
+    var dockRect = dock.getBoundingClientRect();
+    var centerX = (leftEdge + rightEdge) / 2;
+    rowEl.style.left = Math.round(centerX - dockRect.left) + "px";
+    var tr = trig.getBoundingClientRect();
+    var pillH = rowEl.offsetHeight || 30;
+    rowEl.style.bottom = Math.max(0, Math.round((dockRect.bottom - (tr.top + tr.height / 2)) - pillH / 2)) + "px";
+    rowEl.style.display = "";
   }
 
   var scheduled = false;
