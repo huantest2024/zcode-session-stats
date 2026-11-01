@@ -138,7 +138,17 @@ function detailHtml(d) {
     ["模型用时", fmtDur(d.model_ms)],
     ["工具调用用时", fmtDur(d.tool_ms)],
     ["首 token 平均（TTFT）", fmtDur(d.ttft_ms_avg)],
-    ["输出速度（TPS）", d.tps != null ? `${d.tps} tok/s` : "—"],
+    ["实时 TPS（最近请求）", (() => {
+      if (d.live_tps != null) return `${d.live_tps} tok/s`;
+      // 旧版服务端无 live_tps 字段：从 recent 自算
+      for (const r of d.recent || []) {
+        if (r.done_at != null && r.fta != null && (r.out || 0) > 0 && r.done_at > r.fta) {
+          return `${Math.round(r.out * 1000 / (r.done_at - r.fta) * 10) / 10} tok/s`;
+        }
+      }
+      return "—";
+    })()],
+    ["平均 TPS（会话累计）", d.tps != null ? `${d.tps} tok/s` : "—"],
     ["输入（含缓存）", fmtTok(t.input)],
     ["输出", fmtTok(t.output)],
     ["— 推理", fmtTok(t.reasoning)],
@@ -147,6 +157,16 @@ function detailHtml(d) {
     ["总 token", fmtTok(t.total)],
     ["缓存命中率", fmtPct(d.cache_hit_pct)],
   ];
+  // 最近一次完成的请求：输入/输出/缓存命中
+  let lr = null;
+  for (const r of d.recent || []) {
+    if (r.done_at != null) { lr = r; break; }
+  }
+  if (lr && lr["in"] > 0) {
+    rows.push(["最近请求 输入", fmtTok(lr["in"])]);
+    rows.push(["最近请求 输出", fmtTok(lr.out)]);
+    rows.push(["最近请求 缓存命中", fmtPct(Math.round((lr.cread || 0) * 1000 / lr["in"]) / 10)]);
+  }
   const scopeLine =
     d.scope === "today"
       ? `今日 ${d.sessions ?? "—"} 个会话`
