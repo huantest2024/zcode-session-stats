@@ -24,7 +24,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 SERVER_NAME = "session-stats"
-SERVER_VERSION = "0.2.0"
+SERVER_VERSION = "0.3.0"
 UI_URI = "ui://session-stats/panel.html"
 PLUGIN_ROOT = Path(__file__).resolve().parent.parent
 PANEL_FILE = PLUGIN_ROOT / "ui" / "panel.html"
@@ -439,6 +439,7 @@ HTTP_PORT = int(os.environ.get("ZCODE_STATS_HTTP_PORT", "31710"))
 # pill 代码下发路径解析顺序：环境变量（开发者热更新用）→ 插件内置副本（共享默认）→ 开发目录
 PILLS_CANDIDATES = [
     os.environ.get("ZCODE_STATS_PILLS_PATH", ""),
+    str(PLUGIN_ROOT / "pills.js"),
     str(PLUGIN_ROOT / "server" / "pills.js"),
     str(PLUGIN_ROOT.parents[1] / "patches" / "pills.js"),
 ]

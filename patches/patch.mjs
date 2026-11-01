@@ -11,7 +11,7 @@
  *
  * 注意：ZCode 自动更新会覆盖 app.asar，更新后重新 apply 即可（本脚本幂等）。
  */
-import { execSync } from "node:child_process";
+import { execSync, spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -59,6 +59,46 @@ function fixedDrives() {
 // 生产模式：全盘自动定位 ZCode 的 resources 目录
 // ① 每个本地盘的常见安装模式（精确路径，瞬时）② 各盘浅层扫描（深度≤2，目录名含 ZCode，
 // 必须真实存在 app.asar 才命中）。仍未命中则返回 null，由调用方提示手动指定。
+// 部署常驻数据服务（独立于 MCP 生命周期）：复制三件套到 %LOCALAPPDATA%\session-stats\，
+// 写登录自启项（Startup .cmd），并立即拉起 pythonw。失败不影响补丁本身。
+function installService() {
+  try {
+    const srcDir = path.join(here, "..", "plugins", "session-stats", "server");
+    const svcDir = path.join(process.env.LOCALAPPDATA || "", "session-stats");
+    fs.mkdirSync(svcDir, { recursive: true });
+    for (const f of ["stats_server.py", "pills.js", "service_standalone.py"]) {
+      fs.copyFileSync(path.join(srcDir, f), path.join(svcDir, f));
+    }
+    let py = "";
+    try {
+      const out = execSync("where python", { encoding: "utf8", windowsHide: true });
+      const first = out.split(/\r?\n/).map((s) => s.trim()).find(Boolean);
+      // 排除微软商店的 python 空壳别名（运行它只会打开商店）
+      if (first && !/WindowsApps/i.test(first)) py = first;
+    } catch { /* 未找到 python */ }
+    if (!py) {
+      log("提示: 未找到 python，跳过常驻数据服务部署（pill 仍由会话内 MCP 服务供数）。");
+      return;
+    }
+    const pyw = path.join(path.dirname(py), "pythonw.exe");
+    const exe = fs.existsSync(pyw) ? pyw : py;
+    const startupDir = path.join(
+      process.env.APPDATA || "", "Microsoft", "Windows", "Start Menu", "Programs", "Startup"
+    );
+    fs.mkdirSync(startupDir, { recursive: true });
+    const entry = path.join(startupDir, "session-stats-service.cmd");
+    fs.writeFileSync(entry,
+      "@echo off\r\nstart \"\" \"" + exe + "\" \"" + path.join(svcDir, "service_standalone.py") + "\"\r\n",
+      "utf8");
+    spawn(exe, [path.join(svcDir, "service_standalone.py")], {
+      detached: true, stdio: "ignore", windowsHide: true,
+    }).unref();
+    log(`✓ 常驻数据服务已部署并启动（登录自启）: ${svcDir}`);
+  } catch (e) {
+    log("提示: 常驻服务部署失败（不影响补丁本身）: " + (e && e.message || e));
+  }
+}
+
 function resolveResourcesDir() {
   if (TEST_MODE) return process.env.ZCODE_RESOURCES_DIR;
   const pf = process.env.ProgramFiles || "C:\\Program Files";
@@ -303,8 +343,9 @@ function apply() {
     })();
     if (!markerCheck) die("替换后校验失败：新 asar 里读不到补丁标记（请用 restore 还原后反馈）");
     log(`✓ 补丁完成: app ${appVer} + patch ${PATCH_VERSION}（${after.files} 文件 / ${after.unpacked.size} unpacked）`);
+    installService();
     log("下一步: 启动 ZCode，在任意会话的输入框下方查看统计 pill。");
-    log("数据服务由 session-stats 插件（≥0.2.0）的 MCP 服务器提供，请确认插件已更新启用。");
+    log("数据由常驻服务供数（登录自启）；无会话时统计条依旧显示。");
   };
   checkAndFinish().catch((e) => {
     console.error("✗ 打包/替换失败: " + (e && e.stack || e));
