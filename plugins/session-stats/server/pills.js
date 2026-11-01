@@ -261,9 +261,17 @@
     var shownHtml = shown != null
       ? shown + ' tok/s' + (lt && lt.inflight ? '<span class="live">●</span>' : "")
       : "—";
-    if (mode === "compact") {
-      // 迷你版：只显示关键信息——实时 TPS + token 消耗量
+    if (mode === "mini") {
+      // 迷你版：实时 TPS + token 消耗量
       return pillEl("⏱", shownHtml + '<span class="sep">·</span><b>' + fmtTok(t.total) + " tok</b>");
+    }
+    if (mode === "mid") {
+      // 中档：步数 + 速度 + 消耗量 + 缓存命中（去"轮"字与分隔竖线，紧凑单行）
+      return pillEl("⏱",
+        "<b>" + (data.steps != null ? data.steps : 0) + " 步</b>" +
+        '<span class="sep">·</span>' + shownHtml +
+        '<span class="sep">·</span><b>' + fmtTok(t.total) + "</b>" +
+        '<span class="sep">·</span>命中 ' + (data.cache_hit_pct != null ? data.cache_hit_pct : "—") + "%");
     }
     return pillEl("⏱",
       "<b>" + (data.turns != null ? data.turns : "—") + " 轮 " + (data.steps != null ? data.steps : 0) + " 步</b>" +
@@ -338,7 +346,13 @@
       rightEdge = trig.getBoundingClientRect().left;
     }
     var gap = rightEdge - leftEdge;
-    var order = pillMode === "full" ? ["full", "compact"] : ["compact", "full"];
+    var dockW = dock.getBoundingClientRect().width;
+    /* 档位随输入框宽度：宽 → 完整版；中 → 中档；窄 → 迷你版。
+       落位再按空隙校验，放不下自动降一档，保证不重叠。 */
+    var order;
+    if (dockW >= 700) order = ["full", "mid", "mini"];
+    else if (dockW >= 460) order = ["mid", "mini"];
+    else order = ["mini"];
     var chosen = null;
     for (var mi = 0; mi < order.length; mi++) {
       var mode = order[mi];
