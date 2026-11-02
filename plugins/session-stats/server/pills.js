@@ -324,6 +324,15 @@
       setPopup(!popupOpen);
       ev.stopPropagation();
     });
+    // pill 外壳（含图标）：三档内容 span 由 ensureModeSpans 挂进来
+    var pill = document.createElement("span");
+    pill.className = "__sspills-pill";
+    pill.setAttribute("data-act", "detail");
+    var ico = document.createElement("span");
+    ico.className = "ico";
+    ico.textContent = "⏱";
+    pill.appendChild(ico);
+    el.appendChild(pill);
     return el;
   }
 
