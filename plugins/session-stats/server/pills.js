@@ -204,12 +204,7 @@
   function poll() {
     var sid = currentSessionId();
     lastSid = sid;
-    /* 输入框宽度变化（侧栏开合不触发 window resize）→ 立即重布局换档 */
-    var vd = visibleDock();
-    if (vd) {
-      var w = vd.getBoundingClientRect().width;
-      if (Math.abs(w - lastDockW) > 2) { lastDockW = w; layout(); if (popupOpen) renderPopup(); }
-    }
+    requestLayout(); // 每次轮询统一走调度器（宽度比对交给 ResizeObserver）
     if (sid === "draft") {
       // 新会话（尚未产生请求）：显示空态，不去借别的会话的数据
       data = { draft: true, session_source: "draft" };
@@ -225,7 +220,7 @@
       .then(function (j) {
         data = j; lastOk = Date.now(); fails = 0;
         render();
-        layout();
+        requestLayout();
         if (popupOpen) renderPopup();
       })
       .catch(function () {
@@ -330,9 +325,24 @@
     return docks[0] || null;
   }
 
-  /* 布局：pill 放进「左侧 chip 组 ↔ 模型选择器」之间的空隙并居中；
-     放不下完整版 → 自动缩窄为迷你版（实时 TPS + token 消耗量）；再放不下才隐藏。
-     垂直对齐模型选择器中心线。 */
+  /* 布局调度器：所有触发点只置脏标记，每帧最多执行一次完整布局。
+     - 单次布局内一次性量取全部几何（同一 dock、同一帧），杜绝跨 dock/过期 rect
+     - 档位判定带真滞回（±24px），临界宽度不再反复跳档
+     - 空隙不足时先降档；连续 4 次（≈2 秒）都放不下才隐藏，恢复条件一到立即回来 */
+  var layoutDirty = true;
+  var layoutScheduled = false;
+  var shrinkStreak = 0;
+
+  function requestLayout() {
+    layoutDirty = true;
+    if (layoutScheduled) return;
+    layoutScheduled = true;
+    requestAnimationFrame(function () {
+      layoutScheduled = false;
+      if (layoutDirty) { layoutDirty = false; layout(); }
+    });
+  }
+
   function layout() {
     var dock = visibleDock();
     if (!dock) {
@@ -343,27 +353,40 @@
       if (!rowEl) rowEl = makeRow();
       dock.appendChild(rowEl);
     }
+    var dockRect = dock.getBoundingClientRect();
     var trig = dock.querySelector('[data-testid="chat-model-select-trigger"]');
     if (!trig) { rowEl.style.display = "none"; return; }
     var leftChip = findChipByText(dock, "电脑操作") || findChipByText(dock, "完全访问");
-    var leftEdge, rightEdge;
+    var leftEdge;
     if (leftChip) {
       leftEdge = leftChip.getBoundingClientRect().right;
-      rightEdge = trig.getBoundingClientRect().left;
     } else {
-      var dr0 = dock.getBoundingClientRect();
-      leftEdge = dr0.left + 60;
-      rightEdge = trig.getBoundingClientRect().left;
+      leftEdge = dockRect.left + 60;
+    }
+    /* 右边界 = 左 chip 右侧所有按钮（模型选择器、上下文查看图标等）中最近者的左边缘——
+       空隙里有什么原生控件都自动避开，绝不覆盖 */
+    var trigRect = trig.getBoundingClientRect();
+    var rightEdge = trigRect.left;
+    var btns = dock.querySelectorAll("button,[role='button']");
+    for (var bi = 0; bi < btns.length; bi++) {
+      var br = btns[bi].getBoundingClientRect();
+      if (br.width > 0 && br.left > leftEdge + 4 && br.left < rightEdge) rightEdge = br.left;
     }
     var gap = rightEdge - leftEdge;
-    var dockW = dock.getBoundingClientRect().width;
-    /* 档位随输入框宽度即时判定（无滞回）：宽 → 完整版；中 → 中档；窄 → 迷你版。
-       防振荡靠「内容只在档位变化时重建」+ 档位判定用宽度而非空隙（空隙抖动不引起重建）。
-       落位按空隙校验，放不下自动降一档。 */
-    var order;
-    if (dockW >= 700) order = ["full", "mid", "mini"];
-    else if (dockW >= 460) order = ["mid", "mini"];
-    else order = ["mini"];
+    var dockW = dockRect.width;
+
+    /* 档位判定：按 dock 宽度 + 真滞回（升降门槛错开 48px），临界宽度稳定不跳 */
+    var HY = 24;
+    var want;
+    if (pillMode === "full") want = dockW >= 700 - HY ? "full" : (dockW >= 460 - HY ? "mid" : "mini");
+    else if (pillMode === "mid") want = dockW >= 700 + HY ? "full" : (dockW >= 460 - HY ? "mid" : "mini");
+    else want = dockW >= 700 + HY ? "full" : (dockW >= 460 + HY ? "mid" : "mini");
+
+    var order = [want];
+    var all = ["full", "mid", "mini"];
+    for (var ai = 0; ai < all.length; ai++) {
+      if (all[ai] !== want) order.push(all[ai]);
+    }
     var chosen = null;
     for (var mi = 0; mi < order.length; mi++) {
       var mode = order[mi];
@@ -374,14 +397,21 @@
       rowEl.style.display = "";
       if (gap >= rowEl.offsetWidth + 24) { chosen = mode; break; }
     }
-    if (!chosen) { rowEl.style.display = "none"; return; }
+    if (!chosen) {
+      /* 连续放不下才隐藏；一旦隐藏，由 5 秒轮询/宽度变化自动重试恢复 */
+      shrinkStreak++;
+      if (shrinkStreak >= 4 || rowEl.style.display === "none") {
+        rowEl.style.display = "none";
+        return;
+      }
+      return; // 给动画中的侧栏一点缓冲，下一帧再试
+    }
+    shrinkStreak = 0;
     pillMode = chosen;
-    var dockRect = dock.getBoundingClientRect();
     var centerX = (leftEdge + rightEdge) / 2;
     rowEl.style.left = Math.round(centerX - dockRect.left) + "px";
-    var tr = trig.getBoundingClientRect();
     var pillH = rowEl.offsetHeight || 30;
-    rowEl.style.bottom = Math.max(0, Math.round((dockRect.bottom - (tr.top + tr.height / 2)) - pillH / 2)) + "px";
+    rowEl.style.bottom = Math.max(0, Math.round((dockRect.bottom - (trigRect.top + trigRect.height / 2)) - pillH / 2)) + "px";
     rowEl.style.display = "";
   }
 
@@ -391,7 +421,7 @@
     scheduled = true;
     requestAnimationFrame(function () {
       scheduled = false;
-      layout();
+      requestLayout();
       var sid = currentSessionId();
       if (sid !== lastSid) poll();
     });
@@ -404,16 +434,22 @@
       setPopup(false);
     }
   }, true);
-  window.addEventListener("resize", function () { layout(); if (popupOpen) renderPopup(); });
-  /* 输入框宽度变化（侧栏开合不触发 window resize）：轮询里比对宽度，变了就重布局 */
-  var lastDockW = 0;
+  window.addEventListener("resize", function () { requestLayout(); if (popupOpen) renderPopup(); });
   document.addEventListener("scroll", function () { if (popupOpen) renderPopup(); }, true);
 
   var mo = new MutationObserver(schedule);
   mo.observe(document.documentElement, {
     childList: true, subtree: true, attributes: true, attributeFilter: ["data-session-id"],
   });
-  layout();
+  /* 输入框容器尺寸变化（侧栏开合/拖分隔条不触发 window resize）：ResizeObserver 直接触发重布局 */
+  if (typeof ResizeObserver !== "undefined") {
+    var ro = new ResizeObserver(function () { requestLayout(); });
+    var roTimer = setInterval(function () {
+      var d = visibleDock();
+      if (d) { ro.observe(d); clearInterval(roTimer); }
+    }, 2000);
+  }
+  requestLayout();
   popEl = document.createElement("div");
   popEl.className = "__sspills-pop";
   document.body.appendChild(popEl);
