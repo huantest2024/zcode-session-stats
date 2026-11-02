@@ -286,10 +286,14 @@
     modeSpans = {};
     var modes = ["full", "mid", "mini"];
     for (var i = 0; i < modes.length; i++) {
-      var s = document.createElement("span");
-      s.className = "__sspills-mode";
-      s.style.display = "none";
-      pill.appendChild(s);
+      var s = pill.querySelector(".__sspills-mode[data-mode='" + modes[i] + "']");
+      if (!s) { // 不存在才创建，防热更新边界下重复追加
+        s = document.createElement("span");
+        s.className = "__sspills-mode";
+        s.setAttribute("data-mode", modes[i]);
+        s.style.display = "none";
+        pill.appendChild(s);
+      }
       modeSpans[modes[i]] = s;
     }
   }
