@@ -6,7 +6,7 @@
 
   var ENDPOINT = "http://127.0.0.1:31710";
   var POLL_MS = 5000;
-  var data = null, lastOk = 0, fails = 0, popupOpen = false, pillMode = "full";
+  var data = null, lastOk = 0, fails = 0, popupOpen = false, pillMode = "full", openedAt = 0;
   var rowEl = null, popEl = null, css = null, lastHtml = "";
 
   function fmtDur(ms) {
@@ -167,6 +167,7 @@
     popupOpen = open;
     if (!popEl) return;
     popEl.style.display = open ? "block" : "none";
+    openedAt = open ? Date.now() : 0;
     if (open) renderPopup();
   }
 
@@ -291,9 +292,10 @@
   function makeRow() {
     var el = document.createElement("div");
     el.className = "__sspills-row";
+    el.style.cursor = "pointer";
     el.addEventListener("click", function (ev) {
-      var act = ev.target && ev.target.closest && ev.target.closest("[data-act='detail']");
-      if (act) setPopup(!popupOpen);
+      // 点击 pill 任意位置都开合弹窗（不要求命中特定子元素，防重建竞态）
+      setPopup(!popupOpen);
       ev.stopPropagation();
     });
     return el;
@@ -310,12 +312,14 @@
     return null;
   }
 
-  /* 只取「可见」的输入条容器——多标签页时隐藏标签页的 dock 也在 DOM 里，
-     拿第一个会量到错误几何（重叠的根因）。 */
+  /* 只取「可见」的输入条容器——多标签页时隐藏标签页的 dock 也在 DOM 里。
+     不能用 offsetParent 判断（fixed 定位/特殊容器下恒为 null，可见也会误判为隐藏），
+     改用实测宽度 > 0。 */
   function visibleDock() {
     var docks = document.querySelectorAll("[data-v4-composer-dock-content]");
     for (var i = 0; i < docks.length; i++) {
-      if (docks[i].offsetParent !== null) return docks[i];
+      var r = docks[i].getBoundingClientRect();
+      if (r.width > 0 && r.height > 0) return docks[i];
     }
     return docks[0] || null;
   }
@@ -347,17 +351,29 @@
     }
     var gap = rightEdge - leftEdge;
     var dockW = dock.getBoundingClientRect().width;
-    /* 档位随输入框宽度：宽 → 完整版；中 → 中档；窄 → 迷你版。
-       落位再按空隙校验，放不下自动降一档，保证不重叠。 */
-    var order;
-    if (dockW >= 700) order = ["full", "mid", "mini"];
-    else if (dockW >= 460) order = ["mid", "mini"];
-    else order = ["mini"];
+    /* 档位随输入框宽度（含 ±16px 滞回防振荡）：宽 → 完整版；中 → 中档；窄 → 迷你版。
+       当前档位在滞回带内优先保持（不重建 innerHTML——重建会导致点击落空的竞态）；
+       落位按空隙校验，放不下自动降一档。 */
+    var HY = 16;
+    function widthAllows(mode) {
+      if (mode === "full") return dockW >= (pillMode === "full" ? 700 - HY : 700 + HY);
+      if (mode === "mid") return dockW >= (pillMode === "mid" ? 460 - HY : 460 + HY);
+      return true;
+    }
+    var order = [];
+    if (widthAllows(pillMode)) order.push(pillMode); // 当前档位优先（滞回）
+    var all = ["full", "mid", "mini"];
+    for (var ai = 0; ai < all.length; ai++) {
+      if (order.indexOf(all[ai]) < 0 && widthAllows(all[ai])) order.push(all[ai]);
+    }
+    if (!order.length) order = ["mini"];
     var chosen = null;
     for (var mi = 0; mi < order.length; mi++) {
       var mode = order[mi];
-      var html = pillHtml(mode);
-      if (html !== lastHtml) { rowEl.innerHTML = html; lastHtml = html; }
+      if (mode !== pillMode) {
+        var html = pillHtml(mode);
+        if (html !== lastHtml) { rowEl.innerHTML = html; lastHtml = html; }
+      }
       rowEl.style.display = "";
       if (gap >= rowEl.offsetWidth + 24) { chosen = mode; break; }
     }
@@ -385,7 +401,9 @@
   }
 
   document.addEventListener("click", function (ev) {
-    if (popupOpen && rowEl && !rowEl.contains(ev.target) && popEl && !popEl.contains(ev.target)) {
+    if (!popupOpen) return;
+    if (Date.now() - openedAt < 400) return; // 刚开启：忽略宿主合成的迟到点击，防秒关
+    if (rowEl && !rowEl.contains(ev.target) && popEl && !popEl.contains(ev.target)) {
       setPopup(false);
     }
   }, true);
