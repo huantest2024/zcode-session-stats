@@ -204,6 +204,12 @@
   function poll() {
     var sid = currentSessionId();
     lastSid = sid;
+    /* 输入框宽度变化（侧栏开合不触发 window resize）→ 立即重布局换档 */
+    var vd = visibleDock();
+    if (vd) {
+      var w = vd.getBoundingClientRect().width;
+      if (Math.abs(w - lastDockW) > 2) { lastDockW = w; layout(); if (popupOpen) renderPopup(); }
+    }
     if (sid === "draft") {
       // 新会话（尚未产生请求）：显示空态，不去借别的会话的数据
       data = { draft: true, session_source: "draft" };
@@ -351,22 +357,13 @@
     }
     var gap = rightEdge - leftEdge;
     var dockW = dock.getBoundingClientRect().width;
-    /* 档位随输入框宽度（含 ±16px 滞回防振荡）：宽 → 完整版；中 → 中档；窄 → 迷你版。
-       当前档位在滞回带内优先保持（不重建 innerHTML——重建会导致点击落空的竞态）；
+    /* 档位随输入框宽度即时判定（无滞回）：宽 → 完整版；中 → 中档；窄 → 迷你版。
+       防振荡靠「内容只在档位变化时重建」+ 档位判定用宽度而非空隙（空隙抖动不引起重建）。
        落位按空隙校验，放不下自动降一档。 */
-    var HY = 16;
-    function widthAllows(mode) {
-      if (mode === "full") return dockW >= (pillMode === "full" ? 700 - HY : 700 + HY);
-      if (mode === "mid") return dockW >= (pillMode === "mid" ? 460 - HY : 460 + HY);
-      return true;
-    }
-    var order = [];
-    if (widthAllows(pillMode)) order.push(pillMode); // 当前档位优先（滞回）
-    var all = ["full", "mid", "mini"];
-    for (var ai = 0; ai < all.length; ai++) {
-      if (order.indexOf(all[ai]) < 0 && widthAllows(all[ai])) order.push(all[ai]);
-    }
-    if (!order.length) order = ["mini"];
+    var order;
+    if (dockW >= 700) order = ["full", "mid", "mini"];
+    else if (dockW >= 460) order = ["mid", "mini"];
+    else order = ["mini"];
     var chosen = null;
     for (var mi = 0; mi < order.length; mi++) {
       var mode = order[mi];
@@ -408,6 +405,8 @@
     }
   }, true);
   window.addEventListener("resize", function () { layout(); if (popupOpen) renderPopup(); });
+  /* 输入框宽度变化（侧栏开合不触发 window resize）：轮询里比对宽度，变了就重布局 */
+  var lastDockW = 0;
   document.addEventListener("scroll", function () { if (popupOpen) renderPopup(); }, true);
 
   var mo = new MutationObserver(schedule);
