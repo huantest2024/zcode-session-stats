@@ -7,7 +7,7 @@
   var ENDPOINT = "http://127.0.0.1:31710";
   var POLL_MS = 5000;
   var data = null, lastOk = 0, fails = 0, popupOpen = false, pillMode = "full", openedAt = 0;
-  var rowEl = null, popEl = null, css = null, lastHtml = "";
+  var rowEl = null, popEl = null, css = null;
 
   function fmtDur(ms) {
     if (ms == null) return "—";
@@ -249,14 +249,11 @@
     return null;
   }
 
-  function pillEl(ico, body) {
-    return '<span class="__sspills-pill" data-act="detail">' +
-      '<span class="ico">' + ico + "</span>" + body + "</span>";
-  }
-  function pillHtml(mode) {
-    if (!data) return pillEl("⏱", "加载中…");
-    if (data.draft) return pillEl("⏱", "新会话 · 暂无统计");
-    if (data.error) return pillEl("⏱", "统计不可用");
+  function pillBody(mode) {
+    // 三档内容的内层 HTML（外层 pill 壳由 makeRow 常驻创建，切换只改 display，零重建）
+    if (!data) return "加载中…";
+    if (data.draft) return "新会话 · 暂无统计";
+    if (data.error) return "统计不可用";
     var t = data.tokens || {};
     var lt = liveTps(data);
     var shown = lt ? Math.round(lt.v * 10) / 10 : data.tps;
@@ -264,30 +261,58 @@
       ? shown + ' tok/s' + (lt && lt.inflight ? '<span class="live">●</span>' : "")
       : "—";
     if (mode === "mini") {
-      // 迷你版：实时 TPS + token 消耗量
-      return pillEl("⏱", shownHtml + '<span class="sep">·</span><b>' + fmtTok(t.total) + " tok</b>");
+      return shownHtml + '<span class="sep">·</span><b>' + fmtTok(t.total) + " tok</b>";
     }
     if (mode === "mid") {
-      // 中档：步数 + 速度 + 消耗量 + 缓存命中（去"轮"字与分隔竖线，紧凑单行）
-      return pillEl("⏱",
-        "<b>" + (data.steps != null ? data.steps : 0) + " 步</b>" +
+      return "<b>" + (data.steps != null ? data.steps : 0) + " 步</b>" +
         '<span class="sep">·</span>' + shownHtml +
         '<span class="sep">·</span><b>' + fmtTok(t.total) + "</b>" +
-        '<span class="sep">·</span>命中 ' + (data.cache_hit_pct != null ? data.cache_hit_pct : "—") + "%");
+        '<span class="sep">·</span>命中 ' + (data.cache_hit_pct != null ? data.cache_hit_pct : "—") + "%";
     }
-    return pillEl("⏱",
-      "<b>" + (data.turns != null ? data.turns : "—") + " 轮 " + (data.steps != null ? data.steps : 0) + " 步</b>" +
+    return "<b>" + (data.turns != null ? data.turns : "—") + " 轮 " + (data.steps != null ? data.steps : 0) + " 步</b>" +
       '<span class="sep">·</span>' + shownHtml +
       '<span class="dv"></span>' +
       "<b>" + fmtTok(t.total) + " tok</b>" +
-      '<span class="sep">·</span>缓存命中 ' + (data.cache_hit_pct != null ? data.cache_hit_pct : "—") + "%");
+      '<span class="sep">·</span>缓存命中 ' + (data.cache_hit_pct != null ? data.cache_hit_pct : "—") + "%";
+  }
+
+  /* 三档内容常驻为三个子 span，档位切换只改 display（无 innerHTML 重建 → 无闪现土壤） */
+  var modeSpans = null; // { full, mid, mini }
+  var lastBody = {};    // 每档上次渲染的内容缓存
+  function ensureModeSpans() {
+    if (modeSpans && modeSpans.full && modeSpans.full.isConnected) return;
+    var pill = rowEl.querySelector(".__sspills-pill");
+    if (!pill) return;
+    modeSpans = {};
+    var modes = ["full", "mid", "mini"];
+    for (var i = 0; i < modes.length; i++) {
+      var s = document.createElement("span");
+      s.className = "__sspills-mode";
+      s.style.display = "none";
+      pill.appendChild(s);
+      modeSpans[modes[i]] = s;
+    }
   }
   function render() {
     if (!rowEl) return;
     var stale = Date.now() - lastOk > 9e5;
     rowEl.classList.toggle("stale", stale);
-    var html = pillHtml(pillMode);
-    if (html !== lastHtml) { rowEl.innerHTML = html; lastHtml = html; }
+    ensureModeSpans();
+    if (!modeSpans) return;
+    var modes = ["full", "mid", "mini"];
+    for (var i = 0; i < modes.length; i++) {
+      var m = modes[i];
+      var body = pillBody(m);
+      if (body !== lastBody[m]) { modeSpans[m].innerHTML = body; lastBody[m] = body; }
+    }
+    if (rowEl.style.display !== "none") setModeSpans(pillMode);
+  }
+  function setModeSpans(mode) {
+    if (!modeSpans) return;
+    var modes = ["full", "mid", "mini"];
+    for (var i = 0; i < modes.length; i++) {
+      modeSpans[modes[i]].style.display = modes[i] === mode ? "" : "none";
+    }
   }
 
   function makeRow() {
@@ -402,12 +427,10 @@
       if (all[ai] !== want) order.push(all[ai]);
     }
     var chosen = null;
+    ensureModeSpans();
     for (var mi = 0; mi < order.length; mi++) {
       var mode = order[mi];
-      if (mode !== pillMode) {
-        var html = pillHtml(mode);
-        if (html !== lastHtml) { rowEl.innerHTML = html; lastHtml = html; }
-      }
+      setModeSpans(mode); // 纯 display 切换，零重建
       rowEl.style.display = "";
       if (gap >= rowEl.offsetWidth + 24) { chosen = mode; break; }
     }
@@ -422,6 +445,7 @@
     }
     shrinkStreak = 0;
     pillMode = chosen;
+    setModeSpans(chosen);
     var centerX = (leftEdge + rightEdge) / 2;
     rowEl.style.left = Math.round(centerX - dockRect.left) + "px";
     var pillH = rowEl.offsetHeight || 30;
