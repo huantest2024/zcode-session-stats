@@ -343,7 +343,21 @@
     });
   }
 
+  /* 清扫幽灵实例：React 重建 dock 会泄漏旧 rowEl（代码只追新不删旧），
+     泄漏元素停留旧档位与新 pill 叠加闪现。每次布局前清掉一切非当前实例。 */
+  function purgeForeign() {
+    var rows = document.querySelectorAll(".__sspills-row");
+    for (var i = 0; i < rows.length; i++) {
+      if (rows[i] !== rowEl && rows[i].parentNode) rows[i].parentNode.removeChild(rows[i]);
+    }
+    var pops = document.querySelectorAll(".__sspills-pop");
+    for (var j = 0; j < pops.length; j++) {
+      if (pops[j] !== popEl && pops[j].parentNode) pops[j].parentNode.removeChild(pops[j]);
+    }
+  }
+
   function layout() {
+    purgeForeign();
     var dock = visibleDock();
     if (!dock) {
       if (rowEl) { rowEl.remove(); }
