@@ -133,7 +133,17 @@
       '<div class="foot">' + foot + "</div>";
   }
 
+  /* 自愈：僵尸实例可能把 popEl 从 body 里删掉，用前先确保挂载 */
+  function ensurePopEl() {
+    if (!popEl) {
+      popEl = document.createElement("div");
+      popEl.className = "__sspills-pop";
+    }
+    if (!popEl.isConnected) document.body.appendChild(popEl);
+  }
+
   function renderPopup() {
+    ensurePopEl();
     if (!popEl) return;
     popEl.innerHTML = popupHtml();
     if (popupOpen && rowEl) {
@@ -165,6 +175,7 @@
 
   function setPopup(open) {
     popupOpen = open;
+    ensurePopEl();
     if (!popEl) return;
     popEl.style.display = open ? "block" : "none";
     openedAt = open ? Date.now() : 0;
