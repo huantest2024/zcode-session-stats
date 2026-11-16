@@ -21,3 +21,6 @@ __pycache__/
 
 # 本地开发市场清单（发布用仓库根的 marketplace.json）
 plugins/marketplace.json
+
+# 本地转发用安装文档（不进开源库）
+docs/SETUP_GUIDE.md

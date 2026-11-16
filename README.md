@@ -1,8 +1,8 @@
 # session-stats
 
-[中文](./README.md) | 会话统计插件 for ZCode Desktop。
+ZCode 会话统计插件。当前版本：[v0.2.7](https://github.com/huantest2024/zcode-session-stats/releases/tag/v0.2.7) · [全部版本下载](https://github.com/huantest2024/zcode-session-stats/releases)
 
-ZCode 会话统计插件：轮次/步数、模型/工具耗时、TTFT（首 token 平均延迟）、TPS（会话平均 +
+特性：轮次/步数、模型/工具耗时、TTFT（首 token 平均延迟）、TPS（会话平均 +
 最近请求）、token 用量、缓存命中率与模型分布。
 
 - **零第三方依赖**：MCP 服务器为 Python 标准库实现（3.10+），无 pip 依赖
@@ -21,7 +21,7 @@ ZCode 会话统计插件：轮次/步数、模型/工具耗时、TTFT（首 toke
 ## 安装
 
 插件本体：ZCode Desktop → **Plugin Marketplace → Add** → 粘贴本仓库地址
-（或下载 ZIP 后粘贴解压目录）→ **Install session-stats** → 重启 → `/stats`。
+（或从 [Releases](https://github.com/huantest2024/zcode-session-stats/releases) 下载最新版 Source code (zip)，解压后粘贴解压目录）→ **Install session-stats** → 重启 → `/stats`。
 
 输入框统计条（可选）：额外需要 Node.js。完全退出 ZCode → 双击
 `patches\apply-patch.cmd` → 重启。ZCode 自动更新后重跑一次；`restore-patch.cmd` 一键还原。

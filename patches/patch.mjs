@@ -24,10 +24,10 @@ import {
 } from "./tools/node_modules/@electron/asar/lib/asar.js";
 import { readArchiveHeaderSync } from "./tools/node_modules/@electron/asar/lib/disk.js";
 
-const PATCH_VERSION = "1.3.0";
+const PATCH_VERSION = "1.4.0";
 const MARKER = "out/session-stats-pills.json";
 const INJECT_TAG = "__SSPILLS_INJECTED__";
-const UNPACK_GLOB = "**/node_modules/{@img,node-pty,ssh2}/**";
+const UNPACK_GLOB = "**/node_modules/{@img,node-pty,ssh2,@napi-rs}/**";
 const DEFAULT_RESOURCES = path.join(
   process.env.LOCALAPPDATA || path.join(os.homedir(), "AppData", "Local"),
   "Programs", "ZCode", "resources"
@@ -59,15 +59,39 @@ function fixedDrives() {
 // 生产模式：全盘自动定位 ZCode 的 resources 目录
 // ① 每个本地盘的常见安装模式（精确路径，瞬时）② 各盘浅层扫描（深度≤2，目录名含 ZCode，
 // 必须真实存在 app.asar 才命中）。仍未命中则返回 null，由调用方提示手动指定。
-// 部署常驻数据服务（独立于 MCP 生命周期）：复制三件套到 %LOCALAPPDATA%\session-stats\，
-// 写登录自启项（Startup .cmd），并立即拉起 pythonw。失败不影响补丁本身。
-function installService() {
+// 部署常驻数据服务（独立于 MCP 生命周期）：复制四件套到 %LOCALAPPDATA%\session-stats\，
+// 写登录自启项（Startup .cmd），并立即拉起 pythonw。同时部署自包含重打器（patcher/：
+// patch.mjs + loader + asar 依赖）并记录 resources 路径——watch_update.py 据此在
+// ZCode 更新后自动重打补丁。失败不影响补丁本身。
+function installService(resourcesDirPath) {
   try {
-    const srcDir = path.join(here, "..", "plugins", "session-stats", "server");
     const svcDir = path.join(process.env.LOCALAPPDATA || "", "session-stats");
     fs.mkdirSync(svcDir, { recursive: true });
-    for (const f of ["stats_server.py", "pills.js", "service_standalone.py"]) {
-      fs.copyFileSync(path.join(srcDir, f), path.join(svcDir, f));
+    // 服务文件来源分两种布局：仓库/解压包（patches/ 与 plugins/ 并列）正常复制；
+    // 守望重打器自身是部署布局（服务文件就在 patcher 上级 = svcDir），无需复制。
+    const repoServerDir = path.join(here, "..", "plugins", "session-stats", "server");
+    const selfHosted = path.resolve(here, "..") === path.resolve(svcDir);
+    if (fs.existsSync(repoServerDir)) {
+      for (const f of ["stats_server.py", "pills.js", "service_standalone.py", "watch_update.py",
+                       "watch_once.py", "injector.py"]) {
+        fs.copyFileSync(path.join(repoServerDir, f), path.join(svcDir, f));
+      }
+      // loader 源文件在补丁器目录（不在插件 server 目录）
+      fs.copyFileSync(path.join(here, "pills-loader.js"), path.join(svcDir, "pills-loader.js"));
+    } else if (!selfHosted) {
+      log("提示: 未找到插件 server 源目录，跳过常驻服务文件刷新（补丁本身不受影响）");
+    }
+    const patcherDir = path.join(svcDir, "patcher");
+    fs.mkdirSync(patcherDir, { recursive: true });
+    if (!selfHosted) { // 部署布局下 patcher 就是它自己，复制自己没有意义
+      fs.copyFileSync(path.join(here, "patch.mjs"), path.join(patcherDir, "patch.mjs"));
+      fs.copyFileSync(path.join(here, "pills-loader.js"), path.join(patcherDir, "pills-loader.js"));
+      fs.cpSync(path.join(here, "tools"), path.join(patcherDir, "tools"), { recursive: true, force: true });
+    }
+    if (resourcesDirPath) {
+      fs.writeFileSync(path.join(svcDir, "install.json"),
+        JSON.stringify({ resources: resourcesDirPath, deployedAt: new Date().toISOString() }, null, 2),
+        "utf8");
     }
     let py = "";
     try {
@@ -93,6 +117,40 @@ function installService() {
     spawn(exe, [path.join(svcDir, "service_standalone.py")], {
       detached: true, stdio: "ignore", windowsHide: true,
     }).unref();
+    // 兜底层：计划任务每分钟单次探测重打。常驻进程可能被外部终止
+    // （2026-11-11 实测无声消失），系统级重复触发不依赖任何进程存活。
+    try {
+      // 用 XML 注册：默认 schtasks 参数会带「电池不跑 / 睡眠错过不补跑」的电源策略，
+      // 2026-11-11 实测导致长关机时段兜底完全失效。这里显式关掉这些限制。
+      const BS = String.fromCharCode(92);
+      let user = (process.env.USERDOMAIN || "") + BS + (process.env.USERNAME || "");
+      if (user.startsWith(BS)) user = user.slice(1);
+      const xml = `<?xml version="1.0" encoding="UTF-16"?>
+<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+  <Triggers>
+    <TimeTrigger><Repetition><Interval>PT1M</Interval><StopAtDurationEnd>false</StopAtDurationEnd></Repetition><StartBoundary>2026-01-01T00:00:00</StartBoundary><Enabled>true</Enabled></TimeTrigger>
+    <LogonTrigger><UserId>${user}</UserId><Enabled>true</Enabled></LogonTrigger>
+  </Triggers>
+  <Settings>
+    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
+    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
+    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
+    <StartWhenAvailable>true</StartWhenAvailable>
+    <AllowHardTerminate>true</AllowHardTerminate>
+    <ExecutionTimeLimit>PT10M</ExecutionTimeLimit>
+    <Enabled>true</Enabled>
+  </Settings>
+  <Actions><Exec><Command>"${exe}"</Command><Arguments>"${path.join(svcDir, "watch_once.py")}"</Arguments></Exec></Actions>
+</Task>
+`;
+      const xmlPath = path.join(svcDir, "watch-task.xml");
+      fs.writeFileSync(xmlPath, "﻿" + xml, "utf16le");
+      execSync(`schtasks /Create /F /TN "session-stats-watch" /XML "${xmlPath}"`,
+        { windowsHide: true, timeout: 15000 });
+      log("✓ 计划任务已注册（每分钟兜底探测，电池/唤醒/登录均生效）: session-stats-watch");
+    } catch (e) {
+      log("提示: 计划任务注册失败（常驻守望仍有效）: " + (e && e.message || e));
+    }
     log(`✓ 常驻数据服务已部署并启动（登录自启）: ${svcDir}`);
   } catch (e) {
     log("提示: 常驻服务部署失败（不影响补丁本身）: " + (e && e.message || e));
@@ -240,6 +298,19 @@ function apply() {
   }
   const tmp = fs.mkdtempSync(path.join(here, "work-"));
   extractAll(asarPath, tmp);
+  // 完整性校验：更新器换包瞬间可能读到不完整的 asar，按 header 文件数核对解包结果
+  const diskFiles = (function countFiles(dir) {
+    let n = 0;
+    for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+      if (e.isDirectory()) n += countFiles(path.join(dir, e.name));
+      else n++;
+    }
+    return n;
+  })(tmp);
+  if (diskFiles !== orig.files) {
+    fs.rmSync(tmp, { recursive: true, force: true });
+    die(`解包不完整（磁盘 ${diskFiles} ≠ header ${orig.files}），可能更新器正在换包；稍后重试`);
+  }
   const rendererDir = path.join(tmp, "out", "renderer");
 
   // 2. 版本与幂等检查
@@ -343,7 +414,7 @@ function apply() {
     })();
     if (!markerCheck) die("替换后校验失败：新 asar 里读不到补丁标记（请用 restore 还原后反馈）");
     log(`✓ 补丁完成: app ${appVer} + patch ${PATCH_VERSION}（${after.files} 文件 / ${after.unpacked.size} unpacked）`);
-    installService();
+    installService(resources);
     log("下一步: 启动 ZCode，在任意会话的输入框下方查看统计 pill。");
     log("数据由常驻服务供数（登录自启）；无会话时统计条依旧显示。");
   };
